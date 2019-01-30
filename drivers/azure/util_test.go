@@ -3,7 +3,7 @@ package azure
 import (
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/arm/network"
+	"github.com/Azure/azure-sdk-for-go/profiles/latest/network/mgmt/network"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -13,9 +13,9 @@ func TestParseSecurityRuleProtocol(t *testing.T) {
 		expectedProto network.SecurityRuleProtocol
 		expectedErr   bool
 	}{
-		{"tcp", network.TCP, false},
-		{"udp", network.UDP, false},
-		{"*", network.Asterisk, false},
+		{"tcp", network.SecurityRuleProtocolTCP, false},
+		{"udp", network.SecurityRuleProtocolUDP, false},
+		{"*", network.SecurityRuleProtocolAsterisk, false},
 		{"Invalid", "", true},
 	}
 
