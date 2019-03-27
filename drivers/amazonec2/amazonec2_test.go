@@ -21,6 +21,7 @@ const (
 	testSSHPort    = int64(22)
 	testDockerPort = int64(2376)
 	testSwarmPort  = int64(3376)
+	testSGTraffic  = string("-1")
 )
 
 var (
@@ -37,7 +38,7 @@ func TestConfigureSecurityGroupPermissionsEmpty(t *testing.T) {
 	perms, err := driver.configureSecurityGroupPermissions(securityGroup)
 
 	assert.Nil(t, err)
-	assert.Len(t, perms, 2)
+	assert.Len(t, perms, 3)
 }
 
 func TestConfigureSecurityGroupPermissionsSshOnly(t *testing.T) {
@@ -54,8 +55,9 @@ func TestConfigureSecurityGroupPermissionsSshOnly(t *testing.T) {
 	perms, err := driver.configureSecurityGroupPermissions(group)
 
 	assert.Nil(t, err)
-	assert.Len(t, perms, 1)
+	assert.Len(t, perms, 2)
 	assert.Equal(t, testDockerPort, *perms[0].FromPort)
+	assert.Equal(t, testSGTraffic, *perms[1].IpProtocol)
 }
 
 func TestConfigureSecurityGroupPermissionsDockerOnly(t *testing.T) {
@@ -72,8 +74,9 @@ func TestConfigureSecurityGroupPermissionsDockerOnly(t *testing.T) {
 	perms, err := driver.configureSecurityGroupPermissions(group)
 
 	assert.Nil(t, err)
-	assert.Len(t, perms, 1)
+	assert.Len(t, perms, 2)
 	assert.Equal(t, testSSHPort, *perms[0].FromPort)
+	assert.Equal(t, testSGTraffic, *perms[1].IpProtocol)
 }
 
 func TestConfigureSecurityGroupPermissionsDockerAndSsh(t *testing.T) {
@@ -95,6 +98,33 @@ func TestConfigureSecurityGroupPermissionsDockerAndSsh(t *testing.T) {
 	perms, err := driver.configureSecurityGroupPermissions(group)
 
 	assert.Nil(t, err)
+	assert.Len(t, perms, 1)
+	assert.Equal(t, testSGTraffic, *perms[0].IpProtocol)
+}
+
+func TestConfigureSecurityGroupPermissionsDockerAndSshAndSGTraffic(t *testing.T) {
+	driver := NewTestDriver()
+	group := securityGroup
+	group.IpPermissions = []*ec2.IpPermission{
+		{
+			IpProtocol: aws.String("tcp"),
+			FromPort:   aws.Int64(testSSHPort),
+			ToPort:     aws.Int64(testSSHPort),
+		},
+		{
+			IpProtocol: aws.String("tcp"),
+			FromPort:   aws.Int64(testDockerPort),
+			ToPort:     aws.Int64(testDockerPort),
+		},
+		{
+			IpProtocol:       aws.String("-1"),
+			UserIdGroupPairs: []*ec2.UserIdGroupPair{{GroupId: group.GroupId}},
+		},
+	}
+
+	perms, err := driver.configureSecurityGroupPermissions(group)
+
+	assert.Nil(t, err)
 	assert.Empty(t, perms)
 }
 
@@ -107,19 +137,35 @@ func TestConfigureSecurityGroupPermissionsSkipReadOnly(t *testing.T) {
 	assert.Len(t, perms, 0)
 }
 
+func TestConfigureSecurityGroupPermissionsAllowSGTrafficOnly(t *testing.T) {
+	driver := NewTestDriver()
+	group := securityGroup
+	group.IpPermissions = []*ec2.IpPermission{
+		{
+			IpProtocol:       aws.String("-1"),
+			UserIdGroupPairs: []*ec2.UserIdGroupPair{{GroupId: group.GroupId}},
+		},
+	}
+
+	perms, err := driver.configureSecurityGroupPermissions(group)
+
+	assert.Nil(t, err)
+	assert.Len(t, perms, 2)
+}
+
 func TestConfigureSecurityGroupPermissionsOpenPorts(t *testing.T) {
 	driver := NewTestDriver()
 	driver.OpenPorts = []string{"8888/tcp", "8080/udp", "9090"}
 	perms, err := driver.configureSecurityGroupPermissions(&ec2.SecurityGroup{})
 
 	assert.NoError(t, err)
-	assert.Len(t, perms, 5)
-	assert.Equal(t, aws.Int64(int64(8888)), perms[2].ToPort)
-	assert.Equal(t, aws.String("tcp"), perms[2].IpProtocol)
-	assert.Equal(t, aws.Int64(int64(8080)), perms[3].ToPort)
-	assert.Equal(t, aws.String("udp"), perms[3].IpProtocol)
-	assert.Equal(t, aws.Int64(int64(9090)), perms[4].ToPort)
-	assert.Equal(t, aws.String("tcp"), perms[4].IpProtocol)
+	assert.Len(t, perms, 6)
+	assert.Equal(t, aws.Int64(int64(8888)), perms[3].ToPort)
+	assert.Equal(t, aws.String("tcp"), perms[3].IpProtocol)
+	assert.Equal(t, aws.Int64(int64(8080)), perms[4].ToPort)
+	assert.Equal(t, aws.String("udp"), perms[4].IpProtocol)
+	assert.Equal(t, aws.Int64(int64(9090)), perms[5].ToPort)
+	assert.Equal(t, aws.String("tcp"), perms[5].IpProtocol)
 }
 
 func TestConfigureSecurityGroupPermissionsOpenPortsSkipExisting(t *testing.T) {
@@ -140,9 +186,9 @@ func TestConfigureSecurityGroupPermissionsOpenPortsSkipExisting(t *testing.T) {
 	driver.OpenPorts = []string{"8888/tcp", "8080/udp", "8080"}
 	perms, err := driver.configureSecurityGroupPermissions(group)
 	assert.NoError(t, err)
-	assert.Len(t, perms, 3)
-	assert.Equal(t, aws.Int64(int64(8080)), perms[2].ToPort)
-	assert.Equal(t, aws.String("udp"), perms[2].IpProtocol)
+	assert.Len(t, perms, 4)
+	assert.Equal(t, aws.Int64(int64(8080)), perms[3].ToPort)
+	assert.Equal(t, aws.String("udp"), perms[3].IpProtocol)
 }
 
 func TestConfigureSecurityGroupPermissionsInvalidOpenPorts(t *testing.T) {
@@ -168,6 +214,10 @@ func TestConfigureSecurityGroupPermissionsWithSwarm(t *testing.T) {
 			IpProtocol: aws.String("tcp"),
 			FromPort:   aws.Int64(testDockerPort),
 			ToPort:     aws.Int64(testDockerPort),
+		},
+		{
+			IpProtocol:       aws.String("-1"),
+			UserIdGroupPairs: []*ec2.UserIdGroupPair{{GroupId: group.GroupId}},
 		},
 	}
 
@@ -460,8 +510,14 @@ func TestConfigureSecurityGroupsMixed(t *testing.T) {
 
 	// An ingress permission is added to the existing group.
 	recorder.On("AuthorizeSecurityGroupIngress", &ec2.AuthorizeSecurityGroupIngressInput{
-		GroupId:       aws.String("existingGroupId"),
-		IpPermissions: []*ec2.IpPermission{ipPermission(testDockerPort)},
+		GroupId: aws.String("existingGroupId"),
+		IpPermissions: []*ec2.IpPermission{
+			ipPermission(testDockerPort),
+			{
+				IpProtocol:       aws.String("-1"),
+				UserIdGroupPairs: []*ec2.UserIdGroupPair{{GroupId: aws.String("existingGroupId")}},
+			},
+		},
 	}).Return(
 		&ec2.AuthorizeSecurityGroupIngressOutput{}, nil)
 
@@ -486,8 +542,15 @@ func TestConfigureSecurityGroupsMixed(t *testing.T) {
 
 	// Permissions are added to the new security group.
 	recorder.On("AuthorizeSecurityGroupIngress", &ec2.AuthorizeSecurityGroupIngressInput{
-		GroupId:       aws.String("newGroupId"),
-		IpPermissions: []*ec2.IpPermission{ipPermission(testSSHPort), ipPermission(testDockerPort)},
+		GroupId: aws.String("newGroupId"),
+		IpPermissions: []*ec2.IpPermission{
+			ipPermission(testSSHPort),
+			ipPermission(testDockerPort),
+			{
+				IpProtocol:       aws.String("-1"),
+				UserIdGroupPairs: []*ec2.UserIdGroupPair{{GroupId: aws.String("newGroupId")}},
+			},
+		},
 	}).Return(
 		&ec2.AuthorizeSecurityGroupIngressOutput{}, nil)
 
