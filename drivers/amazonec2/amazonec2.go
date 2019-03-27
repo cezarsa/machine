@@ -1176,7 +1176,7 @@ func (d *Driver) configureSecurityGroupPermissions(group *ec2.SecurityGroup) ([]
 		}
 		if *p.IpProtocol == "-1" {
 			for _, gp := range p.UserIdGroupPairs {
-				if gp.GroupId == group.GroupId {
+				if *gp.GroupId == *group.GroupId {
 					hasSGTrafficAllowed = true
 				}
 			}
